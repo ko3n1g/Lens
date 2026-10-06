@@ -703,12 +703,34 @@ def _build_log_exporter(config: NemoLensConfig):
 
         return ConsoleLogExporter(formatter=_compact_jsonl_formatter)
 
+    # Same selection as spans and metrics: the configured protocol decides, with an import
+    # fallback. Choosing by import alone sent logs over whichever exporter happened to load,
+    # so a process configured for http/protobuf could still point a gRPC exporter at an
+    # HTTP endpoint, or the reverse, and lose every log record.
+    protocol = _resolve_otlp_protocol("logs")
+    prefer_http = protocol in ("http/protobuf", "http/json")
+
+    if prefer_http:
+        try:
+            from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+
+            return OTLPLogExporter()
+        except ImportError:
+            pass  # fall through to gRPC
+
     try:
         from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+
+        return OTLPLogExporter()
     except ImportError:
+        pass
+    try:
         from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
-    return OTLPLogExporter()
+        return OTLPLogExporter()
+    except ImportError:
+        pass
+    raise ImportError("No OTLP log exporter found. Install with: pip install 'nemo-lens[sdk]'")
 
 
 def _set_propagator() -> None:
